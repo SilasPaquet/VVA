@@ -1,0 +1,4 @@
+{
+  "python.defaultInterpreterPath": "/home/silaspaquet/delivery/.venv/bin/python",
+  "python.terminal.activateEnvironment": true
+}

@@ -311,71 +311,140 @@ elif page == "Season Simulator":
     st.title("🏆 Season Simulator")
     
     st.info("This feature allows you to simulate an entire F1 season with multiple races.")
-    
-    col1, col2 = st.columns(2)
-    
+
+    col1, col2, col3 = st.columns(3)
+
     with col1:
         num_races = st.slider("Number of Races", 2, 23, 10)
-        num_simulations = st.slider("Simulations", 1, 10, 1)
-    
     with col2:
-        st.subheader("Drivers in Season")
+        num_simulations = st.slider("Simulations", 1, 10, 1)
+    with col3:
         num_season_drivers = st.slider("Number of drivers in season", 5, 20, 10)
-    
-    if st.button("🏁 Simulate Season"):
-        with st.spinner("Simulating season..."):
-            # Create sample races
-            races_data = []
-            for race_num in range(num_races):
-                drivers = [
-                    {
-                        'driver_id': i,
-                        'driver_name': f"Driver {i}",
-                        'grid': np.random.randint(1, min(num_season_drivers + 1, 21)),
-                        'constructor_id': (i % 10) + 1,
-                        'constructor': f"Team {(i % 10) + 1}"
-                    }
-                    for i in range(num_season_drivers)
-                ]
-                
-                races_data.append({
-                    'circuit_id': (race_num % 24) + 1,
-                    'drivers_info': drivers,
-                    'weather_factor': np.random.uniform(0.8, 1.2)
-                })
-            
-            simulator = GPSimulator(predictor, loader, engineer)
-            championship = simulator.simulate_season(races_data, num_simulations)
-            
-            st.success("Season Simulation Complete!")
-            st.dataframe(
-                championship[['position', 'driver_name', 'constructor', 'points', 'wins']],
-                use_container_width=True
+
+    weather_mode = st.selectbox(
+        "Weather Mode",
+        ["Mixed (random)", "Dry (stable)", "Wet (stable)"],
+        index=0
+    )
+
+    st.subheader("Season Driver Roster")
+    st.caption("Select real drivers and constructors from the historical dataset.")
+
+    driver_options_df, constructor_options_df, latest_team_by_driver = get_driver_team_options(loader)
+
+    driver_labels = driver_options_df['driver_name'].tolist()
+    driver_ids = driver_options_df['driverId'].astype(int).tolist()
+    driver_label_to_id = dict(zip(driver_labels, driver_ids))
+
+    constructor_names = constructor_options_df['name'].tolist()
+    constructor_ids = constructor_options_df['constructorId'].astype(int).tolist()
+    constructor_name_to_id = dict(zip(constructor_names, constructor_ids))
+
+    season_roster = []
+    for i in range(num_season_drivers):
+        roster_col1, roster_col2 = st.columns(2)
+
+        default_driver_index = i if i < len(driver_labels) else 0
+        with roster_col1:
+            selected_driver_label = st.selectbox(
+                f"Driver {i+1}",
+                driver_labels,
+                index=default_driver_index,
+                key=f"season_driver_select_{i}"
             )
-            
-            # Visualization
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                fig = px.bar(
-                    championship.head(10),
-                    x='driver_name',
-                    y='points',
-                    title='Top 10 Championship Points',
-                    labels={'driver_name': 'Driver', 'points': 'Points'}
+        selected_driver_id = driver_label_to_id[selected_driver_label]
+
+        default_constructor_id = latest_team_by_driver.get(selected_driver_id, constructor_ids[0])
+        try:
+            default_constructor_index = constructor_ids.index(default_constructor_id)
+        except ValueError:
+            default_constructor_index = 0
+
+        with roster_col2:
+            selected_team_name = st.selectbox(
+                f"Team {i+1}",
+                constructor_names,
+                index=default_constructor_index,
+                key=f"season_team_select_{i}"
+            )
+        selected_constructor_id = constructor_name_to_id[selected_team_name]
+
+        season_roster.append({
+            'driver_id': selected_driver_id,
+            'driver_name': selected_driver_label,
+            'constructor_id': selected_constructor_id,
+            'constructor': selected_team_name
+        })
+
+    selected_driver_ids = [entry['driver_id'] for entry in season_roster]
+    has_duplicate_drivers = len(set(selected_driver_ids)) != len(selected_driver_ids)
+    if has_duplicate_drivers:
+        st.warning("You selected the same driver more than once in the season roster.")
+
+    if st.button("🏁 Simulate Season"):
+        if has_duplicate_drivers:
+            st.error("Please select unique drivers before running the season simulation.")
+        else:
+            with st.spinner("Simulating season..."):
+                races_data = []
+                circuit_ids = loader.circuits['circuitId'].dropna().astype(int).tolist()
+                if not circuit_ids:
+                    circuit_ids = [1]
+
+                for race_num in range(num_races):
+                    grid_positions = np.random.permutation(np.arange(1, num_season_drivers + 1))
+
+                    drivers_for_race = []
+                    for idx, base_driver in enumerate(season_roster):
+                        race_driver = base_driver.copy()
+                        race_driver['grid'] = int(grid_positions[idx])
+                        drivers_for_race.append(race_driver)
+
+                    if weather_mode == "Dry (stable)":
+                        weather_factor = 1.0
+                    elif weather_mode == "Wet (stable)":
+                        weather_factor = 0.8
+                    else:
+                        weather_factor = float(np.random.uniform(0.8, 1.2))
+
+                    races_data.append({
+                        'circuit_id': circuit_ids[race_num % len(circuit_ids)],
+                        'drivers_info': drivers_for_race,
+                        'weather_factor': weather_factor
+                    })
+
+                simulator = GPSimulator(predictor, loader, engineer)
+                championship = simulator.simulate_season(races_data, num_simulations)
+
+                st.success("Season Simulation Complete!")
+                st.dataframe(
+                    championship[['position', 'driver_name', 'constructor', 'points', 'wins']],
+                    use_container_width=True
                 )
-                st.plotly_chart(fig, use_container_width=True)
-            
-            with col2:
-                fig = px.scatter(
-                    championship,
-                    x='wins',
-                    y='points',
-                    hover_data=['driver_name'],
-                    title='Wins vs Championship Points',
-                    size='races'
-                )
-                st.plotly_chart(fig, use_container_width=True)
+
+                # Visualization
+                chart_col1, chart_col2 = st.columns(2)
+
+                with chart_col1:
+                    fig = px.bar(
+                        championship.head(10),
+                        x='driver_name',
+                        y='points',
+                        title='Top 10 Championship Points',
+                        labels={'driver_name': 'Driver', 'points': 'Points'}
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+                with chart_col2:
+                    fig = px.scatter(
+                        championship,
+                        x='wins',
+                        y='points',
+                        hover_data=['driver_name'],
+                        title='Wins vs Championship Points',
+                        size='races'
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
 
 
 elif page == "Analytics":
