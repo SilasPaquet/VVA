@@ -28,7 +28,7 @@ from config import WeatherSimulator
 
 
 # Page configuration must be the first Streamlit command
-st.set_page_config(page_title="F1 Weather Lab", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="F1 Predictor", layout="wide", initial_sidebar_state="collapsed")
 
 # Load Custom CSS
 try:
@@ -41,7 +41,7 @@ except FileNotFoundError:
 st.markdown("""
 <div class="f1-header-container">
     <div class="f1-title-box">
-        <h1 class="f1-main-title">F1 WEATHER LAB</h1>
+        <h1 class="f1-main-title">F1 PREDICTOR</h1>
         <div class="f1-sub-title">RACE PROJECTION SYSTEM</div>
     </div>
 </div>
@@ -924,4 +924,4 @@ elif page == "ÉCURIES":
 
 st.divider()
 st.markdown("---")
-st.markdown("🏁 **F1 Race Prediction System** | Modified UI styling matching F1 Weather Lab Aesthetics")
+st.markdown("🏁 **F1 Race Prediction System**")

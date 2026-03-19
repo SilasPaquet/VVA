@@ -18,7 +18,7 @@ class GPSimulator:
         self.volatility_scale = max(0.0, min(float(volatility_scale), 1.0))
         self.race_data = None
 
-        # Data-driven simulation settings inferred from historical CSVs.
+        # Data-driven simulation settings inferred from CSVs.
         self.points_table = self._infer_points_table()
         inferred_std = self._infer_randomness_std()
         self.randomness_std = 0.0 if self.deterministic else min(inferred_std, self.volatility_scale)
