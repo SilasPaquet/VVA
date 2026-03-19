@@ -14,14 +14,13 @@ class GPSimulator:
         self.predictor = predictor
         self.loader = loader
         self.engineer = engineer
-        self.deterministic = bool(deterministic)
-        self.volatility_scale = max(0.0, min(float(volatility_scale), 1.0))
+        self.deterministic = True
+        self.volatility_scale = 0.0
         self.race_data = None
 
         # Data-driven simulation settings inferred from CSVs.
         self.points_table = self._infer_points_table()
-        inferred_std = self._infer_randomness_std()
-        self.randomness_std = 0.0 if self.deterministic else min(inferred_std, self.volatility_scale)
+        self.randomness_std = 0.0
 
     def _infer_points_table(self) -> Dict[int, int]:
         """Infer points table from latest available season in CSV results."""
@@ -157,20 +156,12 @@ class GPSimulator:
             if safety_car:
                 finish_prob *= 1.1
 
-            # Deterministic-by-default: same inputs -> same outputs.
-            random_factor = 1.0
-            if self.randomness_std > 0:
-                random_factor = np.random.normal(1.0, self.randomness_std)
-                random_factor = max(0.05, float(random_factor))
+            # Fully deterministic prediction from CSV model.
+            position_pred = int(max(1, position_pred))
+            points_pred = max(0, points_pred)
+            finish_prob = np.clip(finish_prob, 0, 1)
 
-            position_pred = int(max(1, position_pred * random_factor))
-            points_pred = max(0, points_pred * random_factor)
-            finish_prob = np.clip(finish_prob * random_factor, 0, 1)
-
-            if self.deterministic:
-                finished = finish_prob >= 0.5
-            else:
-                finished = np.random.random() < finish_prob
+            finished = finish_prob >= 0.5
 
             result = {
                 'driver_id': driver_info.get('driver_id'),

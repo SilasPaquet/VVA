@@ -177,7 +177,7 @@ def test_config():
     print("=" * 60)
     
     try:
-        from config import Config, WeatherSimulator, CircuitCharacteristics
+        from config import Config, WeatherSimulator
         
         Config.ensure_dirs()
         print(f"✓ Directories ensured")
@@ -186,9 +186,6 @@ def test_config():
         
         weather = WeatherSimulator.get_weather_factor('light_rain')
         print(f"✓ Weather system working: light_rain factor = {weather}")
-        
-        circuit = CircuitCharacteristics.get_circuit_info(1)
-        print(f"✓ Circuit info: {circuit['name']} ({circuit['country']})")
         
         return True
     except Exception as e:

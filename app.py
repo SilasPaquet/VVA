@@ -499,7 +499,7 @@ elif page == "SAISON":
                     elif weather_mode == "Wet (stable)":
                         weather_factor = 0.8
                     else:
-                        weather_factor = float(np.random.uniform(0.8, 1.2))
+                        weather_factor = 1.0
 
                     races_data.append({
                         'circuit_id': circuit_ids[race_num % len(circuit_ids)],

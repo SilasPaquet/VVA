@@ -47,11 +47,7 @@ class Config:
     MAX_DRIVERS = 20
     MAX_POSITION = 20
     
-    # FIA Points System
-    FIA_POINTS = {
-        1: 25, 2: 18, 3: 15, 4: 12, 5: 10,
-        6: 8, 7: 6, 8: 4, 9: 2, 10: 1
-    }
+
     
     # Feature columns (must match training data)
     FEATURE_COLUMNS = [
@@ -89,84 +85,11 @@ class WeatherSimulator:
     
     @staticmethod
     def get_random_weather() -> tuple:
-        """Get random weather conditions"""
-        types = list(WeatherSimulator.WEATHER_TYPES.keys())
-        selected = np.random.choice(types)
-        factor = WeatherSimulator.WEATHER_TYPES[selected]['factor']
-        return selected, factor
+        """Get mixed weather conditions (deterministic mean)"""
+        return 'mixed', 1.0
 
 
-class CircuitCharacteristics:
-    """Circuit-specific characteristics affecting races"""
-    
-    # Circuit difficulty and characteristics
-    CIRCUITS = {
-        1: {
-            'name': 'Albert Park',
-            'country': 'Australia',
-            'type': 'Street Circuit',
-            'difficulty': 'Medium',
-            'overtaking': 'Easy',
-            'tire_degradation': 'Medium'
-        },
-        2: {
-            'name': 'Sepang',
-            'country': 'Malaysia',
-            'type': 'Permanent Circuit',
-            'difficulty': 'Medium',
-            'overtaking': 'Medium',
-            'tire_degradation': 'High'
-        },
-        17: {
-            'name': 'Shanghai',
-            'country': 'China',
-            'type': 'Permanent Circuit',
-            'difficulty': 'High',
-            'overtaking': 'Difficult',
-            'tire_degradation': 'High'
-        },
-        3: {
-            'name': 'Bahrain',
-            'country': 'Bahrain',
-            'type': 'Permanent Circuit',
-            'difficulty': 'Medium',
-            'overtaking': 'Medium',
-            'tire_degradation': 'Very High'
-        }
-    }
-    
-    @staticmethod
-    def get_circuit_info(circuit_id: int) -> Dict:
-        """Get circuit characteristics"""
-        return CircuitCharacteristics.CIRCUITS.get(
-            circuit_id,
-            {
-                'name': f'Circuit {circuit_id}',
-                'country': 'Unknown',
-                'type': 'Permanent Circuit',
-                'difficulty': 'Medium',
-                'overtaking': 'Medium',
-                'tire_degradation': 'Medium'
-            }
-        )
 
-
-class DriverProfile:
-    """Driver performance profiles"""
-    
-    @staticmethod
-    def get_driver_strength(driver_id: int) -> Dict:
-        """Get driver strengths and weaknesses"""
-        # This would typically come from a database
-        # For now, returning generic profile
-        return {
-            'qualifying': 0.8,  # 0-1 scale
-            'race_pace': 0.85,
-            'wet_weather': 0.7,
-            'tire_management': 0.75,
-            'consistency': 0.8,
-            'experience': 0.7
-        }
 
 
 class RaceResult:
