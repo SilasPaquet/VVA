@@ -38,6 +38,26 @@ class F1DataLoader:
         self.lap_times = pd.read_csv(self.data_dir / 'lap_times.csv')
         self.status = pd.read_csv(self.data_dir / 'status.csv')
         print("Data loaded successfully!")
+
+    def get_dataset_limits(self):
+        """Return dataset-driven limits used by simulator controls."""
+        max_races_per_season = 23
+        max_drivers_per_race = 20
+
+        if self.races is not None and not self.races.empty:
+            races_per_season = self.races.groupby('year')['raceId'].nunique()
+            if not races_per_season.empty:
+                max_races_per_season = int(races_per_season.max())
+
+        if self.results is not None and not self.results.empty:
+            drivers_per_race = self.results.groupby('raceId')['driverId'].nunique()
+            if not drivers_per_race.empty:
+                max_drivers_per_race = int(drivers_per_race.max())
+
+        return {
+            'max_races_per_season': max(2, max_races_per_season),
+            'max_drivers_per_race': max(2, max_drivers_per_race),
+        }
         
     def get_race_features(self):
         """Create features for race prediction"""

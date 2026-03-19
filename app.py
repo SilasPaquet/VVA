@@ -24,6 +24,7 @@ from data_loader import F1DataLoader
 from feature_engineer import FeatureEngineer
 from model_trainer import F1Predictor
 from gp_simulator import GPSimulator
+from config import WeatherSimulator
 
 
 # Page configuration must be the first Streamlit command
@@ -103,11 +104,66 @@ def get_driver_team_options(loader):
     return drivers_df, constructors_df, latest_team_by_driver
 
 
+def assign_deterministic_grid_positions(loader, drivers_info, race_index=0):
+    """Assign deterministic grid positions from historical average grid per driver."""
+    if not drivers_info:
+        return []
+
+    indexed_drivers = list(enumerate(drivers_info))
+
+    historical_grids = loader.results[['driverId', 'grid']].copy()
+    historical_grids['driverId'] = pd.to_numeric(historical_grids['driverId'], errors='coerce')
+    historical_grids['grid'] = pd.to_numeric(historical_grids['grid'], errors='coerce')
+    historical_grids = historical_grids.dropna(subset=['driverId', 'grid'])
+    historical_grids = historical_grids[historical_grids['grid'] > 0]
+
+    if historical_grids.empty:
+        ranked_drivers = sorted(
+            indexed_drivers,
+            key=lambda item: (
+                str(item[1].get('driver_name', '')),
+                int(item[1].get('driver_id', 0)),
+                int(item[0])
+            )
+        )
+    else:
+        avg_grid_by_driver = historical_grids.groupby('driverId')['grid'].mean().to_dict()
+        ranked_drivers = sorted(
+            indexed_drivers,
+            key=lambda item: (
+                float(avg_grid_by_driver.get(int(item[1]['driver_id']), 1_000.0)),
+                str(item[1].get('driver_name', '')),
+                int(item[1]['driver_id']),
+                int(item[0])
+            )
+        )
+
+    # Rotate deterministically across races to avoid a frozen grid during season simulations.
+    shift = race_index % len(ranked_drivers)
+    rotated_drivers = ranked_drivers[shift:] + ranked_drivers[:shift]
+
+    grid_by_index = {
+        int(original_index): idx + 1
+        for idx, (original_index, _) in enumerate(rotated_drivers)
+    }
+
+    drivers_with_grid = []
+    for original_index, driver in indexed_drivers:
+        driver_with_grid = driver.copy()
+        driver_with_grid['grid'] = int(grid_by_index[original_index])
+        drivers_with_grid.append(driver_with_grid)
+
+    return drivers_with_grid
+
+
 # Load models
 loader, engineer, predictor = load_and_train_models()
 st.session_state.loader = loader
 st.session_state.engineer = engineer
 st.session_state.predictor = predictor
+dataset_limits = loader.get_dataset_limits()
+max_race_drivers_limit = max(2, int(dataset_limits.get('max_drivers_per_race', 20)))
+max_season_races_limit = max(2, int(dataset_limits.get('max_races_per_season', 23)))
 
 
 # Page content
@@ -180,6 +236,13 @@ if page == "QUALIFS":
 
 elif page == "COURSE":
     st.title("🎯 Single Race Simulator")
+
+    driver_options_df, constructor_options_df, latest_team_by_driver = get_driver_team_options(loader)
+    if driver_options_df.empty or constructor_options_df.empty:
+        st.error("Driver or constructor data is missing from CSV files.")
+        st.stop()
+
+    max_available_drivers = max(2, min(len(driver_options_df), max_race_drivers_limit))
     
     col1, col2 = st.columns(2)
     
@@ -197,7 +260,8 @@ elif page == "COURSE":
         
         # Driver grid
         st.subheader("Grid Position")
-        num_drivers = st.slider("Number of drivers", 2, 20, 10)
+        default_num_drivers = min(10, max_available_drivers)
+        num_drivers = st.slider("Number of drivers", 2, max_available_drivers, default_num_drivers)
     
     with col2:
         st.subheader("Weather & Conditions")
@@ -215,8 +279,6 @@ elif page == "COURSE":
     # Driver setup
     st.subheader("Drivers in Race")
     st.caption("Pick specific drivers and teams from your historical dataset.")
-
-    driver_options_df, constructor_options_df, latest_team_by_driver = get_driver_team_options(loader)
 
     driver_labels = driver_options_df['driver_name'].tolist()
     driver_ids = driver_options_df['driverId'].astype(int).tolist()
@@ -244,7 +306,7 @@ elif page == "COURSE":
             grid = st.number_input(
                 f"Grid Position {i+1}",
                 min_value=1,
-                max_value=20,
+                max_value=num_drivers,
                 value=i + 1,
                 key=f"grid_input_{i}"
             )
@@ -288,7 +350,7 @@ elif page == "COURSE":
         elif has_duplicate_grids:
             st.error("Please assign unique grid positions before running the simulation.")
         else:
-            simulator = GPSimulator(predictor, loader, engineer)
+            simulator = GPSimulator(predictor, loader, engineer, deterministic=True)
             results = simulator.simulate_race(
                 circuit_id=circuit_id,
                 drivers_info=drivers_info,
@@ -333,14 +395,30 @@ elif page == "SAISON":
     
     st.info("This feature allows you to simulate an entire F1 season with multiple races.")
 
+    driver_options_df, constructor_options_df, latest_team_by_driver = get_driver_team_options(loader)
+    if driver_options_df.empty or constructor_options_df.empty:
+        st.error("Driver or constructor data is missing from CSV files.")
+        st.stop()
+
+    driver_labels = driver_options_df['driver_name'].tolist()
+    max_season_drivers = max(2, min(len(driver_labels), max_race_drivers_limit))
+    min_season_drivers = 5 if max_season_drivers >= 5 else 2
+
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        num_races = st.slider("Number of Races", 2, 23, 10)
+        default_num_races = min(10, max_season_races_limit)
+        num_races = st.slider("Number of Races", 2, max_season_races_limit, default_num_races)
     with col2:
         num_simulations = st.slider("Simulations", 1, 10, 1)
     with col3:
-        num_season_drivers = st.slider("Number of drivers in season", 5, 20, 10)
+        default_num_season_drivers = min(10, max_season_drivers)
+        num_season_drivers = st.slider(
+            "Number of drivers in season",
+            min_season_drivers,
+            max_season_drivers,
+            default_num_season_drivers
+        )
 
     weather_mode = st.selectbox(
         "Weather Mode",
@@ -351,9 +429,6 @@ elif page == "SAISON":
     st.subheader("Season Driver Roster")
     st.caption("Select real drivers and constructors from the historical dataset.")
 
-    driver_options_df, constructor_options_df, latest_team_by_driver = get_driver_team_options(loader)
-
-    driver_labels = driver_options_df['driver_name'].tolist()
     driver_ids = driver_options_df['driverId'].astype(int).tolist()
     driver_label_to_id = dict(zip(driver_labels, driver_ids))
 
@@ -413,13 +488,11 @@ elif page == "SAISON":
                     circuit_ids = [1]
 
                 for race_num in range(num_races):
-                    grid_positions = np.random.permutation(np.arange(1, num_season_drivers + 1))
-
-                    drivers_for_race = []
-                    for idx, base_driver in enumerate(season_roster):
-                        race_driver = base_driver.copy()
-                        race_driver['grid'] = int(grid_positions[idx])
-                        drivers_for_race.append(race_driver)
+                    drivers_for_race = assign_deterministic_grid_positions(
+                        loader,
+                        season_roster,
+                        race_index=race_num
+                    )
 
                     if weather_mode == "Dry (stable)":
                         weather_factor = 1.0
@@ -434,7 +507,7 @@ elif page == "SAISON":
                         'weather_factor': weather_factor
                     })
 
-                simulator = GPSimulator(predictor, loader, engineer)
+                simulator = GPSimulator(predictor, loader, engineer, deterministic=True)
                 championship = simulator.simulate_season(races_data, num_simulations)
 
                 st.success("Season Simulation Complete!")
@@ -468,7 +541,7 @@ elif page == "SAISON":
                     st.plotly_chart(fig, use_container_width=True)
 
 
-elif page == "Analytics":
+elif page == "ANALYTICS":
     st.title("📈 Detailed Analytics")
     
     # Get race features data
@@ -515,113 +588,339 @@ elif page == "Analytics":
 
 elif page == "ÉCURIES":
     st.markdown("<h2 style='text-align: left; margin-bottom: 2rem; color: #94a3b8; font-size: 1.2rem; letter-spacing: 2px;'>CHOISIR LES DEUX ÉCURIES</h2>", unsafe_allow_html=True)
-    
-    # Get constructors safely handling missing functions/loader state
-    try:
-        _, constructor_options_df, latest_team_by_driver = get_driver_team_options(loader)
-        constructor_names = constructor_options_df['name'].tolist()
-    except Exception:
-        constructor_names = ["Red Bull", "Mercedes", "Ferrari", "McLaren", "Aston Martin", "Alpine", "Williams", "Haas"]
-    
-    colA, colB = st.columns(2)
-    with colA:
-        st.markdown("<div class='f1-subtitle' style='color:#64748b; margin-bottom:10px;'>ÉCURIE A</div>", unsafe_allow_html=True)
-        team_a = st.radio("Team A", constructor_names, key="team_a_select", label_visibility="collapsed")
-    with colB:
-        st.markdown("<div class='f1-subtitle' style='color:#64748b; margin-bottom:10px;'>ÉCURIE B</div>", unsafe_allow_html=True)
-        team_b = st.radio("Team B", constructor_names, index=min(2, len(constructor_names)-1), key="team_b_select", label_visibility="collapsed")
 
-    # Layout for VS card
-    st.markdown("<div style='margin-top: 40px;'></div>", unsafe_allow_html=True)
-    
-    # Determine colors
-    def get_team_color(name):
-        n = name.lower()
-        if 'mclaren' in n: return '#ff8700'
-        if 'ferrari' in n: return '#d92323'
-        if 'red bull' in n: return '#0600ef'
-        if 'mercedes' in n: return '#00d2be'
-        if 'aston' in n: return '#006f62'
-        return '#ffffff'
-        
-    color_a = get_team_color(team_a)
-    color_b = get_team_color(team_b)
-    
-    comp_col1, comp_col2, comp_col3 = st.columns([1, 0.1, 1])
-    with comp_col1:
-        st.markdown(f"""
-        <div class='f1-card' style='text-align: center; border-color: {color_a}; background: rgba(255,255,255,0.02);'>
-            <h2 style='color: {color_a} !important; margin:0;'>{team_a}</h2>
-            <div style='color: #64748b; font-size: 0.9rem;'>Pilote 1 - Pilote 2</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with comp_col2:
-        st.markdown("<div style='text-align: center; margin-top: 30px; font-weight: bold; color: #64748b;'>VS</div>", unsafe_allow_html=True)
-    with comp_col3:
-        st.markdown(f"""
-        <div class='f1-card' style='text-align: center; border-color: {color_b}; background: rgba(255,255,255,0.02);'>
-            <h2 style='color: {color_b} !important; margin:0;'>{team_b}</h2>
-            <div style='color: #64748b; font-size: 0.9rem;'>Pilote 3 - Pilote 4</div>
-        </div>
-        """, unsafe_allow_html=True)
+    constructor_df = loader.constructors[['constructorId', 'name']].drop_duplicates(subset=['constructorId']).copy()
+    enriched_results = loader.results.merge(constructor_df, on='constructorId', how='left')
+    enriched_results = enriched_results.merge(
+        loader.drivers[['driverId', 'forename', 'surname']],
+        on='driverId',
+        how='left'
+    )
+    enriched_results = enriched_results.merge(loader.races[['raceId', 'date']], on='raceId', how='left')
 
-    # Tabs (Skills vs Simulation)
-    tab1, tab2 = st.tabs(["📊 COMPÉTENCES", "🏁 SIMULATION"])
-    
-    with tab1:
-        st.markdown("<h3 style='margin-top: 20px; font-size: 1.2rem; color: #94a3b8;'>COMPARAISON DES ATTRIBUTS</h3>", unsafe_allow_html=True)
-        
-        attributes = [
-            ("Setup vent", 88, 85),
-            ("Pit stop", 94, 88),
-            ("Régularité", 83, 78),
-            ("Gestion pneus", 87, 84)
-        ]
-        
-        for attr, valA, valB in attributes:
+    enriched_results['driver_name'] = (
+        enriched_results['forename'].fillna('') + ' ' + enriched_results['surname'].fillna('')
+    ).str.strip()
+    enriched_results['date'] = pd.to_datetime(enriched_results['date'], errors='coerce')
+    enriched_results['points'] = pd.to_numeric(enriched_results['points'], errors='coerce').fillna(0)
+    enriched_results['grid'] = pd.to_numeric(enriched_results['grid'], errors='coerce')
+    enriched_results['position_num'] = pd.to_numeric(enriched_results['position'], errors='coerce')
+    enriched_results['positionOrder'] = pd.to_numeric(enriched_results['positionOrder'], errors='coerce')
+    enriched_results['finished'] = enriched_results['position_num'].notna().astype(int)
+    enriched_results['podium'] = (enriched_results['positionOrder'] <= 3).fillna(False).astype(int)
+
+    constructor_stats = enriched_results.groupby(['constructorId', 'name']).agg(
+        avg_points=('points', 'mean'),
+        finish_rate=('finished', 'mean'),
+        podium_rate=('podium', 'mean'),
+        avg_grid=('grid', lambda s: s[s > 0].mean()),
+        points_std=('points', 'std')
+    ).reset_index()
+    constructor_stats = constructor_stats.dropna(subset=['name']).fillna(0)
+
+    if constructor_stats.empty:
+        st.error("No constructor data found in CSV files.")
+    else:
+        def normalize_score(series, value, invert=False):
+            values = pd.to_numeric(series, errors='coerce').dropna()
+            if values.empty:
+                return 0.0
+            min_val = float(values.min())
+            max_val = float(values.max())
+            if max_val == min_val:
+                return 50.0
+            score = ((float(value) - min_val) / (max_val - min_val)) * 100.0
+            if invert:
+                score = 100.0 - score
+            return float(np.clip(score, 0, 100))
+
+        constructor_stats['points_strength'] = constructor_stats['avg_points'].apply(
+            lambda v: normalize_score(constructor_stats['avg_points'], v)
+        )
+        constructor_stats['reliability_strength'] = (constructor_stats['finish_rate'] * 100.0).clip(0, 100)
+        constructor_stats['podium_strength'] = (constructor_stats['podium_rate'] * 100.0).clip(0, 100)
+        constructor_stats['quali_strength'] = constructor_stats['avg_grid'].apply(
+            lambda v: normalize_score(constructor_stats['avg_grid'], v, invert=True)
+        )
+        constructor_stats['consistency_strength'] = constructor_stats['points_std'].apply(
+            lambda v: normalize_score(constructor_stats['points_std'], v, invert=True)
+        )
+
+        constructor_names = constructor_stats['name'].sort_values().tolist()
+
+        colA, colB = st.columns(2)
+        with colA:
+            st.markdown("<div class='f1-subtitle' style='color:#64748b; margin-bottom:10px;'>ÉCURIE A</div>", unsafe_allow_html=True)
+            team_a = st.radio("Team A", constructor_names, key="team_a_select", label_visibility="collapsed")
+        with colB:
+            st.markdown("<div class='f1-subtitle' style='color:#64748b; margin-bottom:10px;'>ÉCURIE B</div>", unsafe_allow_html=True)
+            default_index = 1 if len(constructor_names) > 1 else 0
+            team_b = st.radio("Team B", constructor_names, index=default_index, key="team_b_select", label_visibility="collapsed")
+
+        if team_a == team_b:
+            st.warning("Please select two different teams for comparison.")
+
+        team_stats_map = {
+            row['name']: row
+            for _, row in constructor_stats.iterrows()
+        }
+
+        def get_team_drivers(constructor_id, top_n=2):
+            team_rows = enriched_results[enriched_results['constructorId'] == constructor_id].copy()
+            team_rows = team_rows.sort_values('date', ascending=False)
+
+            latest_unique = team_rows.drop_duplicates(subset=['driverId'], keep='first')
+            latest_unique = latest_unique[latest_unique['driver_name'].str.len() > 0]
+
+            selected = []
+            selected_ids = set()
+            for _, row in latest_unique.iterrows():
+                if row['driverId'] in selected_ids:
+                    continue
+                selected.append({'driver_id': int(row['driverId']), 'driver_name': row['driver_name']})
+                selected_ids.add(row['driverId'])
+                if len(selected) >= top_n:
+                    break
+
+            if len(selected) < top_n:
+                fallback_rank = team_rows.groupby(['driverId', 'driver_name'], as_index=False)['points'].sum()
+                fallback_rank = fallback_rank.sort_values('points', ascending=False)
+                for _, row in fallback_rank.iterrows():
+                    if row['driverId'] in selected_ids or not str(row['driver_name']).strip():
+                        continue
+                    selected.append({'driver_id': int(row['driverId']), 'driver_name': row['driver_name']})
+                    selected_ids.add(row['driverId'])
+                    if len(selected) >= top_n:
+                        break
+
+            return selected
+
+        team_a_id = int(team_stats_map[team_a]['constructorId'])
+        team_b_id = int(team_stats_map[team_b]['constructorId'])
+        team_a_drivers = get_team_drivers(team_a_id, top_n=2)
+        team_b_drivers = get_team_drivers(team_b_id, top_n=2)
+        team_a_driver_text = " - ".join([d['driver_name'] for d in team_a_drivers]) or "No driver data"
+        team_b_driver_text = " - ".join([d['driver_name'] for d in team_b_drivers]) or "No driver data"
+
+        st.markdown("<div style='margin-top: 40px;'></div>", unsafe_allow_html=True)
+
+        def get_team_color(name):
+            palette = ['#e10600', '#00d2be', '#ff8700', '#1e5bc6', '#2d826d', '#ed1c24', '#005aff', '#b6babd']
+            return palette[abs(hash(name)) % len(palette)]
+
+        color_a = get_team_color(team_a)
+        color_b = get_team_color(team_b)
+
+        comp_col1, comp_col2, comp_col3 = st.columns([1, 0.1, 1])
+        with comp_col1:
             st.markdown(f"""
-            <div style='background: #131a31; padding: 15px 20px; border-radius: 8px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.05);'>
-                <div style='display:flex; justify-content: space-between; margin-bottom: 8px;'>
-                    <span style='color: {color_a}; font-family: Teko, sans-serif; font-size: 1.4rem;'>{valA}</span>
-                    <span style='color: #94a3b8; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px;'>{attr}</span>
-                    <span style='color: {color_b}; font-family: Teko, sans-serif; font-size: 1.4rem;'>{valB}</span>
-                </div>
-                <div style='display:flex; gap: 8px;'>
-                    <div style='flex: 1; height: 6px; background: rgba(255,255,255,0.05); border-radius: 3px; direction: rtl;'>
-                        <div style='width: {valA}%; height: 100%; background: {color_a}; border-radius: 3px;'></div>
-                    </div>
-                    <div style='flex: 1; height: 6px; background: rgba(255,255,255,0.05); border-radius: 3px;'>
-                        <div style='width: {valB}%; height: 100%; background: {color_b}; border-radius: 3px;'></div>
-                    </div>
-                </div>
+            <div class='f1-card' style='text-align: center; border-color: {color_a}; background: rgba(255,255,255,0.02);'>
+                <h2 style='color: {color_a} !important; margin:0;'>{team_a}</h2>
+                <div style='color: #64748b; font-size: 0.9rem;'>{team_a_driver_text}</div>
             </div>
             """, unsafe_allow_html=True)
-            
-    with tab2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        mode = st.radio("Mode", ["COURSE UNIQUE", "SAISON COMPLÈTE"], horizontal=True, label_visibility="collapsed")
-        
-        st.markdown("<div class='f1-subtitle' style='margin-top:30px; margin-bottom: 10px;'>MÉTÉO</div>", unsafe_allow_html=True)
-        weather = st.radio("Weather Condition", ["DRY", "RAIN", "WIND", "MIXED"], horizontal=True, label_visibility="collapsed")
-        
-        st.markdown("<br><br>", unsafe_allow_html=True)
-        if st.button("LANCER LA COMPARAISON"):
+        with comp_col2:
+            st.markdown("<div style='text-align: center; margin-top: 30px; font-weight: bold; color: #64748b;'>VS</div>", unsafe_allow_html=True)
+        with comp_col3:
             st.markdown(f"""
-            <div style='text-align: center; margin-top: 40px; padding: 30px; background: #131a31; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05);'>
-                <div style='color: #64748b; letter-spacing: 2px; font-size: 0.9rem; margin-bottom: 10px;'>RÉSULTAT COURSE 🏁</div>
-                <h2 style='color: {color_b} !important; font-size: 2rem !important;'>{team_b} remporte le duel</h2>
-                <div style='display: flex; justify-content: center; gap: 60px; margin-top: 30px;'>
-                    <div style='text-align: center;'>
-                        <div style='font-size: 4rem; color: {color_a}; font-family: Teko, sans-serif; line-height: 1;'>12</div>
-                        <div style='color: #94a3b8; font-size: 0.9rem; text-transform: uppercase;'>{team_a}</div>
-                    </div>
-                    <div style='text-align: center;'>
-                        <div style='font-size: 4rem; color: {color_b}; font-family: Teko, sans-serif; line-height: 1;'>18</div>
-                        <div style='color: #94a3b8; font-size: 0.9rem; text-transform: uppercase;'>{team_b}</div>
-                    </div>
-                </div>
+            <div class='f1-card' style='text-align: center; border-color: {color_b}; background: rgba(255,255,255,0.02);'>
+                <h2 style='color: {color_b} !important; margin:0;'>{team_b}</h2>
+                <div style='color: #64748b; font-size: 0.9rem;'>{team_b_driver_text}</div>
             </div>
             """, unsafe_allow_html=True)
+
+        tab1, tab2 = st.tabs(["📊 COMPÉTENCES", "🏁 SIMULATION"])
+
+        with tab1:
+            st.markdown("<h3 style='margin-top: 20px; font-size: 1.2rem; color: #94a3b8;'>COMPARAISON DES ATTRIBUTS (CSV)</h3>", unsafe_allow_html=True)
+
+            team_a_row = team_stats_map[team_a]
+            team_b_row = team_stats_map[team_b]
+
+            attributes = [
+                ("Performance points", int(round(team_a_row['points_strength'])), int(round(team_b_row['points_strength']))),
+                ("Fiabilité", int(round(team_a_row['reliability_strength'])), int(round(team_b_row['reliability_strength']))),
+                ("Podiums", int(round(team_a_row['podium_strength'])), int(round(team_b_row['podium_strength']))),
+                ("Qualifs (grille inverse)", int(round(team_a_row['quali_strength'])), int(round(team_b_row['quali_strength']))),
+                ("Régularité", int(round(team_a_row['consistency_strength'])), int(round(team_b_row['consistency_strength'])))
+            ]
+
+            for attr, valA, valB in attributes:
+                st.markdown(f"""
+                <div style='background: #131a31; padding: 15px 20px; border-radius: 8px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.05);'>
+                    <div style='display:flex; justify-content: space-between; margin-bottom: 8px;'>
+                        <span style='color: {color_a}; font-family: Teko, sans-serif; font-size: 1.4rem;'>{valA}</span>
+                        <span style='color: #94a3b8; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px;'>{attr}</span>
+                        <span style='color: {color_b}; font-family: Teko, sans-serif; font-size: 1.4rem;'>{valB}</span>
+                    </div>
+                    <div style='display:flex; gap: 8px;'>
+                        <div style='flex: 1; height: 6px; background: rgba(255,255,255,0.05); border-radius: 3px; direction: rtl;'>
+                            <div style='width: {valA}%; height: 100%; background: {color_a}; border-radius: 3px;'></div>
+                        </div>
+                        <div style='flex: 1; height: 6px; background: rgba(255,255,255,0.05); border-radius: 3px;'>
+                            <div style='width: {valB}%; height: 100%; background: {color_b}; border-radius: 3px;'></div>
+                        </div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        with tab2:
+            st.markdown("<br>", unsafe_allow_html=True)
+            mode = st.radio("Mode", ["COURSE UNIQUE", "SAISON COMPLÈTE"], horizontal=True, label_visibility="collapsed")
+
+            st.markdown("<div class='f1-subtitle' style='margin-top:30px; margin-bottom: 10px;'>MÉTÉO</div>", unsafe_allow_html=True)
+            weather = st.radio("Weather Condition", ["DRY", "RAIN", "WIND", "MIXED"], horizontal=True, label_visibility="collapsed")
+
+            if mode == "COURSE UNIQUE":
+                circuit_df = loader.circuits[['circuitId', 'name']].dropna(subset=['circuitId', 'name']).copy()
+                circuit_df = circuit_df.sort_values('name')
+                selected_circuit_name = st.selectbox("Circuit", circuit_df['name'].tolist(), key='ecuries_circuit')
+                selected_circuit_id = int(circuit_df[circuit_df['name'] == selected_circuit_name]['circuitId'].iloc[0])
+            else:
+                ecuries_races_default = min(10, max_season_races_limit)
+                season_races = st.slider(
+                    "Nombre de courses",
+                    2,
+                    max_season_races_limit,
+                    ecuries_races_default,
+                    key='ecuries_season_races'
+                )
+                season_sims = st.slider("Nombre de simulations", 1, 10, 1, key='ecuries_season_sims')
+
+            def weather_factor_from_choice(choice):
+                if choice == "DRY":
+                    return WeatherSimulator.get_weather_factor('sunny')
+                if choice == "RAIN":
+                    return WeatherSimulator.get_weather_factor('light_rain')
+                if choice == "WIND":
+                    return WeatherSimulator.get_weather_factor('cloudy')
+                _, factor = WeatherSimulator.get_random_weather()
+                return float(factor)
+
+            st.markdown("<br><br>", unsafe_allow_html=True)
+            if st.button("LANCER LA COMPARAISON"):
+                if team_a == team_b:
+                    st.error("Please select two different teams.")
+                else:
+                    simulator = GPSimulator(predictor, loader, engineer, deterministic=True)
+
+                    selected_drivers = []
+                    for team_name, team_id, team_drivers in [
+                        (team_a, team_a_id, team_a_drivers),
+                        (team_b, team_b_id, team_b_drivers)
+                    ]:
+                        for driver in team_drivers:
+                            selected_drivers.append({
+                                'driver_id': driver['driver_id'],
+                                'driver_name': driver['driver_name'],
+                                'constructor_id': team_id,
+                                'constructor': team_name
+                            })
+
+                    if len(selected_drivers) < 2:
+                        st.error("Not enough driver data for a valid comparison.")
+                    else:
+                        if mode == "COURSE UNIQUE":
+                            race_drivers = assign_deterministic_grid_positions(
+                                loader,
+                                selected_drivers,
+                                race_index=0
+                            )
+
+                            weather_factor = weather_factor_from_choice(weather)
+                            race_results = simulator.simulate_race(
+                                circuit_id=selected_circuit_id,
+                                drivers_info=race_drivers,
+                                weather_factor=weather_factor,
+                                safety_car=False
+                            )
+
+                            team_points = race_results.groupby('constructor')['actual_points'].sum()
+                            team_points = team_points.reindex([team_a, team_b]).fillna(0)
+
+                            if team_points.iloc[0] == team_points.iloc[1]:
+                                headline = "ÉGALITÉ"
+                            else:
+                                headline = f"{team_points.idxmax()} remporte le duel"
+
+                            st.markdown(f"""
+                            <div style='text-align: center; margin-top: 40px; padding: 30px; background: #131a31; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05);'>
+                                <div style='color: #64748b; letter-spacing: 2px; font-size: 0.9rem; margin-bottom: 10px;'>RÉSULTAT COURSE 🏁</div>
+                                <h2 style='font-size: 2rem !important;'>{headline}</h2>
+                                <div style='display: flex; justify-content: center; gap: 60px; margin-top: 30px;'>
+                                    <div style='text-align: center;'>
+                                        <div style='font-size: 4rem; color: {color_a}; font-family: Teko, sans-serif; line-height: 1;'>{int(team_points.iloc[0])}</div>
+                                        <div style='color: #94a3b8; font-size: 0.9rem; text-transform: uppercase;'>{team_a}</div>
+                                    </div>
+                                    <div style='text-align: center;'>
+                                        <div style='font-size: 4rem; color: {color_b}; font-family: Teko, sans-serif; line-height: 1;'>{int(team_points.iloc[1])}</div>
+                                        <div style='color: #94a3b8; font-size: 0.9rem; text-transform: uppercase;'>{team_b}</div>
+                                    </div>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                            st.dataframe(
+                                race_results[['driver_name', 'constructor', 'grid_position', 'predicted_position', 'actual_points']],
+                                use_container_width=True
+                            )
+                        else:
+                            circuit_ids = loader.circuits['circuitId'].dropna().astype(int).tolist()
+                            if not circuit_ids:
+                                st.error("No circuit data found in CSV files.")
+                            else:
+                                races_data = []
+                                for race_idx in range(season_races):
+                                    race_drivers = assign_deterministic_grid_positions(
+                                        loader,
+                                        selected_drivers,
+                                        race_index=race_idx
+                                    )
+
+                                    if weather == "MIXED":
+                                        race_weather_factor = weather_factor_from_choice("MIXED")
+                                    else:
+                                        race_weather_factor = weather_factor_from_choice(weather)
+
+                                    races_data.append({
+                                        'circuit_id': int(circuit_ids[race_idx % len(circuit_ids)]),
+                                        'drivers_info': race_drivers,
+                                        'weather_factor': float(race_weather_factor)
+                                    })
+
+                                championship = simulator.simulate_season(races_data, season_sims)
+                                team_points = championship.groupby('constructor')['points'].sum()
+                                team_points = team_points.reindex([team_a, team_b]).fillna(0)
+
+                                if team_points.iloc[0] == team_points.iloc[1]:
+                                    headline = "ÉGALITÉ SUR LA SAISON"
+                                else:
+                                    headline = f"{team_points.idxmax()} remporte la saison"
+
+                                st.markdown(f"""
+                                <div style='text-align: center; margin-top: 40px; padding: 30px; background: #131a31; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05);'>
+                                    <div style='color: #64748b; letter-spacing: 2px; font-size: 0.9rem; margin-bottom: 10px;'>RÉSULTAT SAISON 🏆</div>
+                                    <h2 style='font-size: 2rem !important;'>{headline}</h2>
+                                    <div style='display: flex; justify-content: center; gap: 60px; margin-top: 30px;'>
+                                        <div style='text-align: center;'>
+                                            <div style='font-size: 4rem; color: {color_a}; font-family: Teko, sans-serif; line-height: 1;'>{round(team_points.iloc[0], 1)}</div>
+                                            <div style='color: #94a3b8; font-size: 0.9rem; text-transform: uppercase;'>{team_a}</div>
+                                        </div>
+                                        <div style='text-align: center;'>
+                                            <div style='font-size: 4rem; color: {color_b}; font-family: Teko, sans-serif; line-height: 1;'>{round(team_points.iloc[1], 1)}</div>
+                                            <div style='color: #94a3b8; font-size: 0.9rem; text-transform: uppercase;'>{team_b}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
+
+                                filtered_championship = championship[
+                                    championship['constructor'].isin([team_a, team_b])
+                                ].sort_values('points', ascending=False)
+                                st.dataframe(
+                                    filtered_championship[['position', 'driver_name', 'constructor', 'points', 'wins']],
+                                    use_container_width=True
+                                )
 
 st.divider()
 st.markdown("---")
