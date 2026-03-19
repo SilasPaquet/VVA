@@ -6,8 +6,19 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
+import plotly.io as pio
 from plotly.subplots import make_subplots
 import os
+
+# Set custom F1 dark theme for Plotly
+pio.templates.default = "plotly_dark"
+custom_template = pio.templates["plotly_dark"]
+custom_template.layout.paper_bgcolor = "rgba(0,0,0,0)"
+custom_template.layout.plot_bgcolor = "rgba(0,0,0,0)"
+custom_template.layout.font.family = "Inter, sans-serif"
+custom_template.layout.title.font.family = "Teko, sans-serif"
+custom_template.layout.title.font.size = 24
+pio.templates.default = custom_template
 
 from data_loader import F1DataLoader
 from feature_engineer import FeatureEngineer
@@ -15,19 +26,29 @@ from model_trainer import F1Predictor
 from gp_simulator import GPSimulator
 
 
-# Page configuration
-st.set_page_config(page_title="F1 Race Predictor", layout="wide")
+# Page configuration must be the first Streamlit command
+st.set_page_config(page_title="F1 Weather Lab", layout="wide", initial_sidebar_state="collapsed")
 
-# Sidebar navigation
-with st.sidebar:
-    st.title("🏁 F1 Predictor")
-    page = st.radio("Navigation", [
-        "Dashboard",
-        "Race Simulator",
-        "Season Simulator",
-        "Analytics",
-        "Model Performance"
-    ])
+# Load Custom CSS
+try:
+    with open("assets/style.css") as f:
+        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+except FileNotFoundError:
+    pass
+
+# Custom Header Display
+st.markdown("""
+<div class="f1-header-container">
+    <div class="f1-title-box">
+        <h1 class="f1-main-title">F1 WEATHER LAB</h1>
+        <div class="f1-sub-title">RACE PROJECTION SYSTEM</div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+# Top navigation
+pages = ["COURSE", "QUALIFS", "SAISON", "ÉCURIES", "ANALYTICS"]
+page = st.radio("Navigation", pages, horizontal=True, label_visibility="collapsed")
 
 # Initialize session state
 if 'predictor' not in st.session_state:
@@ -90,7 +111,7 @@ st.session_state.predictor = predictor
 
 
 # Page content
-if page == "Dashboard":
+if page == "QUALIFS":
     st.title("🏁 F1 Race Predictions Dashboard")
     
     col1, col2, col3 = st.columns(3)
@@ -157,7 +178,7 @@ if page == "Dashboard":
     st.plotly_chart(fig, use_container_width=True)
 
 
-elif page == "Race Simulator":
+elif page == "COURSE":
     st.title("🎯 Single Race Simulator")
     
     col1, col2 = st.columns(2)
@@ -307,7 +328,7 @@ elif page == "Race Simulator":
                 st.plotly_chart(fig, use_container_width=True)
 
 
-elif page == "Season Simulator":
+elif page == "SAISON":
     st.title("🏆 Season Simulator")
     
     st.info("This feature allows you to simulate an entire F1 season with multiple races.")
@@ -492,93 +513,116 @@ elif page == "Analytics":
     st.plotly_chart(fig, use_container_width=True)
 
 
-elif page == "Model Performance":
-    st.title("🤖 Model Performance Metrics")
+elif page == "ÉCURIES":
+    st.markdown("<h2 style='text-align: left; margin-bottom: 2rem; color: #94a3b8; font-size: 1.2rem; letter-spacing: 2px;'>CHOISIR LES DEUX ÉCURIES</h2>", unsafe_allow_html=True)
     
-    st.subheader("Model Information")
-    col1, col2, col3 = st.columns(3)
+    # Get constructors safely handling missing functions/loader state
+    try:
+        _, constructor_options_df, latest_team_by_driver = get_driver_team_options(loader)
+        constructor_names = constructor_options_df['name'].tolist()
+    except Exception:
+        constructor_names = ["Red Bull", "Mercedes", "Ferrari", "McLaren", "Aston Martin", "Alpine", "Williams", "Haas"]
     
-    with col1:
-        st.metric("Points Model Type", "Gradient Boosting")
-    with col2:
-        st.metric("Position Model Type", "Random Forest")
-    with col3:
-        st.metric("Finish Model Type", "Random Forest Classifier")
-    
-    st.divider()
-    
-    # Get predictions on test data
-    X_points, y_points, feature_cols = engineer.get_feature_matrix('points_scored')
-    
-    if len(X_points) > 0:
-        from sklearn.model_selection import train_test_split
-        from sklearn.metrics import mean_squared_error, r2_score
-        
-        X_train, X_test, y_train, y_test = train_test_split(
-            X_points, y_points, test_size=0.2, random_state=42
-        )
-        
-        y_pred = predictor.points_model.predict(X_test)
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            mse = mean_squared_error(y_test, y_pred)
-            st.metric("Mean Squared Error", f"{mse:.4f}")
-        with col2:
-            r2 = r2_score(y_test, y_pred)
-            st.metric("R² Score", f"{r2:.4f}")
-        with col3:
-            rmse = np.sqrt(mse)
-            st.metric("RMSE", f"{rmse:.4f}")
-        
-        st.divider()
-        
-        # Feature importance
-        st.subheader("Feature Importance (Points Model)")
-        
-        if hasattr(predictor.points_model, 'feature_importances_'):
-            importance_df = pd.DataFrame({
-                'feature': feature_cols,
-                'importance': predictor.points_model.feature_importances_
-            }).sort_values('importance', ascending=False)
-            
-            fig = px.bar(
-                importance_df,
-                x='importance',
-                y='feature',
-                orientation='h',
-                title='Feature Importance for Points Prediction'
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        
-        # Predictions vs Actual
-        st.subheader("Predictions vs Actual")
-        
-        comparison_df = pd.DataFrame({
-            'Actual': y_test.values,
-            'Predicted': y_pred,
-            'Error': y_test.values - y_pred
-        }).head(100)
-        
-        fig = px.scatter(
-            comparison_df,
-            x='Actual',
-            y='Predicted',
-            title='Predicted vs Actual Points',
-            labels={'Actual': 'Actual Points', 'Predicted': 'Predicted Points'}
-        )
-        # Add diagonal line
-        fig.add_shape(
-            type="line",
-            x0=0, y0=0,
-            x1=comparison_df['Actual'].max(),
-            y1=comparison_df['Actual'].max(),
-            line=dict(dash="dash")
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    colA, colB = st.columns(2)
+    with colA:
+        st.markdown("<div class='f1-subtitle' style='color:#64748b; margin-bottom:10px;'>ÉCURIE A</div>", unsafe_allow_html=True)
+        team_a = st.radio("Team A", constructor_names, key="team_a_select", label_visibility="collapsed")
+    with colB:
+        st.markdown("<div class='f1-subtitle' style='color:#64748b; margin-bottom:10px;'>ÉCURIE B</div>", unsafe_allow_html=True)
+        team_b = st.radio("Team B", constructor_names, index=min(2, len(constructor_names)-1), key="team_b_select", label_visibility="collapsed")
 
+    # Layout for VS card
+    st.markdown("<div style='margin-top: 40px;'></div>", unsafe_allow_html=True)
+    
+    # Determine colors
+    def get_team_color(name):
+        n = name.lower()
+        if 'mclaren' in n: return '#ff8700'
+        if 'ferrari' in n: return '#d92323'
+        if 'red bull' in n: return '#0600ef'
+        if 'mercedes' in n: return '#00d2be'
+        if 'aston' in n: return '#006f62'
+        return '#ffffff'
+        
+    color_a = get_team_color(team_a)
+    color_b = get_team_color(team_b)
+    
+    comp_col1, comp_col2, comp_col3 = st.columns([1, 0.1, 1])
+    with comp_col1:
+        st.markdown(f"""
+        <div class='f1-card' style='text-align: center; border-color: {color_a}; background: rgba(255,255,255,0.02);'>
+            <h2 style='color: {color_a} !important; margin:0;'>{team_a}</h2>
+            <div style='color: #64748b; font-size: 0.9rem;'>Pilote 1 - Pilote 2</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with comp_col2:
+        st.markdown("<div style='text-align: center; margin-top: 30px; font-weight: bold; color: #64748b;'>VS</div>", unsafe_allow_html=True)
+    with comp_col3:
+        st.markdown(f"""
+        <div class='f1-card' style='text-align: center; border-color: {color_b}; background: rgba(255,255,255,0.02);'>
+            <h2 style='color: {color_b} !important; margin:0;'>{team_b}</h2>
+            <div style='color: #64748b; font-size: 0.9rem;'>Pilote 3 - Pilote 4</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Tabs (Skills vs Simulation)
+    tab1, tab2 = st.tabs(["📊 COMPÉTENCES", "🏁 SIMULATION"])
+    
+    with tab1:
+        st.markdown("<h3 style='margin-top: 20px; font-size: 1.2rem; color: #94a3b8;'>COMPARAISON DES ATTRIBUTS</h3>", unsafe_allow_html=True)
+        
+        attributes = [
+            ("Setup vent", 88, 85),
+            ("Pit stop", 94, 88),
+            ("Régularité", 83, 78),
+            ("Gestion pneus", 87, 84)
+        ]
+        
+        for attr, valA, valB in attributes:
+            st.markdown(f"""
+            <div style='background: #131a31; padding: 15px 20px; border-radius: 8px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.05);'>
+                <div style='display:flex; justify-content: space-between; margin-bottom: 8px;'>
+                    <span style='color: {color_a}; font-family: Teko, sans-serif; font-size: 1.4rem;'>{valA}</span>
+                    <span style='color: #94a3b8; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px;'>{attr}</span>
+                    <span style='color: {color_b}; font-family: Teko, sans-serif; font-size: 1.4rem;'>{valB}</span>
+                </div>
+                <div style='display:flex; gap: 8px;'>
+                    <div style='flex: 1; height: 6px; background: rgba(255,255,255,0.05); border-radius: 3px; direction: rtl;'>
+                        <div style='width: {valA}%; height: 100%; background: {color_a}; border-radius: 3px;'></div>
+                    </div>
+                    <div style='flex: 1; height: 6px; background: rgba(255,255,255,0.05); border-radius: 3px;'>
+                        <div style='width: {valB}%; height: 100%; background: {color_b}; border-radius: 3px;'></div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+    with tab2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        mode = st.radio("Mode", ["COURSE UNIQUE", "SAISON COMPLÈTE"], horizontal=True, label_visibility="collapsed")
+        
+        st.markdown("<div class='f1-subtitle' style='margin-top:30px; margin-bottom: 10px;'>MÉTÉO</div>", unsafe_allow_html=True)
+        weather = st.radio("Weather Condition", ["DRY", "RAIN", "WIND", "MIXED"], horizontal=True, label_visibility="collapsed")
+        
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        if st.button("LANCER LA COMPARAISON"):
+            st.markdown(f"""
+            <div style='text-align: center; margin-top: 40px; padding: 30px; background: #131a31; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05);'>
+                <div style='color: #64748b; letter-spacing: 2px; font-size: 0.9rem; margin-bottom: 10px;'>RÉSULTAT COURSE 🏁</div>
+                <h2 style='color: {color_b} !important; font-size: 2rem !important;'>{team_b} remporte le duel</h2>
+                <div style='display: flex; justify-content: center; gap: 60px; margin-top: 30px;'>
+                    <div style='text-align: center;'>
+                        <div style='font-size: 4rem; color: {color_a}; font-family: Teko, sans-serif; line-height: 1;'>12</div>
+                        <div style='color: #94a3b8; font-size: 0.9rem; text-transform: uppercase;'>{team_a}</div>
+                    </div>
+                    <div style='text-align: center;'>
+                        <div style='font-size: 4rem; color: {color_b}; font-family: Teko, sans-serif; line-height: 1;'>18</div>
+                        <div style='color: #94a3b8; font-size: 0.9rem; text-transform: uppercase;'>{team_b}</div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
 st.divider()
 st.markdown("---")
-st.markdown("🏁 **F1 Race Prediction System** | Powered by Python, Streamlit & Scikit-learn")
+st.markdown("🏁 **F1 Race Prediction System** | Modified UI styling matching F1 Weather Lab Aesthetics")

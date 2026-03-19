@@ -1,0 +1,10 @@
+[theme]
+# F1 Red accent
+primaryColor = "#d92323"
+# Dark navy background
+backgroundColor = "#080b15"
+# Lighter navy for cards and widgets
+secondaryBackgroundColor = "#131a31"
+# Light text
+textColor = "#e2e8f0"
+font = "sans serif"
