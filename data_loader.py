@@ -71,19 +71,11 @@ class F1DataLoader:
         data = data.merge(self.circuits[['circuitId', 'country']], 
                           on='circuitId', how='left')
         
-        # Convert date to datetime
         data['date'] = pd.to_datetime(data['date'])
-        
-        # Calculate driver age at race
         data['dob'] = pd.to_datetime(data['dob'])
         data['driver_age'] = (data['date'] - data['dob']).dt.days / 365.25
-        
-        # Finish status (1 if finished, 0 otherwise)
         data['finished'] = (data['position'].notna()).astype(int)
-        
-        # Points classification
         data['points_scored'] = data['points']
-        
         return data
     
     def get_driver_stats(self, data):

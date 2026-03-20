@@ -18,12 +18,10 @@ class FeatureEngineer:
         data = self.loader.get_race_features()
         data = data.sort_values(['driverId', 'date']).reset_index(drop=True)
         
-        # Rolling statistics (previous races)
         for driver_id in data['driverId'].unique():
             driver_mask = data['driverId'] == driver_id
             driver_data = data[driver_mask]
             
-            # Rolling averages
             data.loc[driver_mask, 'driver_points_rolling'] = \
                 driver_data['points_scored'].rolling(window=lookback_races, min_periods=1).mean()
             data.loc[driver_mask, 'driver_finish_rolling'] = \
@@ -31,7 +29,6 @@ class FeatureEngineer:
             data.loc[driver_mask, 'driver_grid_rolling'] = \
                 driver_data['grid'].rolling(window=lookback_races, min_periods=1).mean()
         
-        # Constructor rolling statistics
         for constructor_id in data['constructorId'].unique():
             constructor_mask = data['constructorId'] == constructor_id
             constructor_data = data[constructor_mask]
@@ -41,11 +38,8 @@ class FeatureEngineer:
             data.loc[constructor_mask, 'constructor_finish_rolling'] = \
                 constructor_data['finished'].rolling(window=lookback_races, min_periods=1).mean()
         
-        # Circuit statistics
         circuit_stats = self.loader.get_circuit_stats(data)
         data = data.merge(circuit_stats, on='circuitId', how='left')
-        
-        # Fill NaN values
         data = data.fillna(data.mean(numeric_only=True))
         
         self.data = data
@@ -72,17 +66,13 @@ class FeatureEngineer:
             'avg_circuit_points', 'circuit_grid_avg', 'year', 'round'
         ]
         
-        # Only use races where position was recorded
         valid_data = self.data[self.data['position'].notna()].copy()
         
         if len(valid_data) == 0:
-            # Return empty datasets if no valid data
             return pd.DataFrame(columns=feature_cols), pd.Series([]), feature_cols
         
         X = valid_data[feature_cols].fillna(0)
-        # Safely convert position to int, handling any remaining NaN values
         y = pd.to_numeric(valid_data['position'], errors='coerce').fillna(1).astype(int)
-        
         return X, y, feature_cols
     
     def preprocess_features(self, X, scaler=None):

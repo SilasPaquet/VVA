@@ -17,8 +17,6 @@ class GPSimulator:
         self.deterministic = True
         self.volatility_scale = 0.0
         self.race_data = None
-
-        # Data-driven simulation settings inferred from CSVs.
         self.points_table = self._infer_points_table()
         self.randomness_std = 0.0
 
@@ -140,15 +138,12 @@ class GPSimulator:
         results = []
 
         for driver_info in drivers_info:
-            # Build model input from historical CSV-derived stats.
             features = self._create_feature_vector(driver_info, circuit_id)
 
-            # Base model predictions.
             points_pred = self.predictor.predict_points(features)
             position_pred = self.predictor.predict_position(features)
             finish_prob = self.predictor.predict_finish(features)
 
-            # Weather is explicitly allowed as external factor.
             if weather_factor < 1.0:
                 finish_prob *= (1 - (weather_factor * 0.3))
                 position_pred += int(5 * (1 - weather_factor))
@@ -156,7 +151,6 @@ class GPSimulator:
             if safety_car:
                 finish_prob *= 1.1
 
-            # Fully deterministic prediction from CSV model.
             position_pred = int(max(1, position_pred))
             points_pred = max(0, points_pred)
             finish_prob = np.clip(finish_prob, 0, 1)

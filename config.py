@@ -11,17 +11,13 @@ import numpy as np
 class Config:
     """System configuration"""
     
-    # Data configuration
     DATA_DIR = 'csv'
     MODELS_DIR = 'models'
-    
-    # Model configuration
-    LOOKBACK_RACES = 5  # Number of races for rolling statistics
+    LOOKBACK_RACES = 5  # for rolling statistics
     TEST_SIZE = 0.2
     RECENT_YEARS = 10
     RANDOM_STATE = 42
     
-    # Training parameters
     POINTS_MODEL_PARAMS = {
         'n_estimators': 100,
         'learning_rate': 0.1,
@@ -41,15 +37,12 @@ class Config:
         'random_state': RANDOM_STATE
     }
     
-    # Simulation parameters
     WEATHER_IMPACT_RANGE = (0.5, 2.0)  # Min and max weather factors
     WEATHER_NEUTRAL = 1.0
     MAX_DRIVERS = 20
     MAX_POSITION = 20
     
 
-    
-    # Feature columns (must match training data)
     FEATURE_COLUMNS = [
         'grid', 'driver_age', 'driver_points_rolling', 'driver_finish_rolling',
         'driver_grid_rolling', 'constructor_points_rolling', 'constructor_finish_rolling',
@@ -87,8 +80,6 @@ class WeatherSimulator:
     def get_random_weather() -> tuple:
         """Get mixed weather conditions (deterministic mean)"""
         return 'mixed', 1.0
-
-
 
 
 
@@ -142,7 +133,6 @@ def calculate_consistency(results: list) -> float:
     std = np.std(points)
     cv = std / mean
     
-    # Convert to 0-1 scale where 1 is most consistent
     return max(0, 1 - cv)
 
 
