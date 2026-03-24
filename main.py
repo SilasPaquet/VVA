@@ -17,6 +17,7 @@ Usage:
 
 import sys
 import argparse
+import os
 from pathlib import Path
 
 from data_loader import F1DataLoader
@@ -25,7 +26,7 @@ from model_trainer import F1Predictor
 from gp_simulator import GPSimulator
 
 
-def train_models():
+def train_models(force_rebuild_data=False, use_clean_cache=True):
     """Train all prediction models"""
     print("=" * 60)
     print("F1 RACE PREDICTION SYSTEM - Model Training")
@@ -34,7 +35,10 @@ def train_models():
     # Load data
     print("\n1. Loading F1 historical data...")
     loader = F1DataLoader()
-    loader.load_all_data()
+    loader.load_all_data(
+        use_clean_cache=use_clean_cache,
+        force_rebuild=force_rebuild_data
+    )
     
     print(f"   ✓ Loaded {len(loader.races)} races")
     print(f"   ✓ Loaded {len(loader.drivers)} drivers")
@@ -64,22 +68,28 @@ def train_models():
     return loader, engineer, predictor
 
 
-def run_dashboard():
+def run_dashboard(force_rebuild_data=False, use_clean_cache=True):
     """Run Streamlit dashboard"""
     import subprocess
     print("Starting Streamlit dashboard...")
     print("Access the app at: http://localhost:8501")
-    subprocess.run([sys.executable, "-m", "streamlit", "run", "app.py"])
+    env = os.environ.copy()
+    env['F1_FORCE_REBUILD_DATA'] = '1' if force_rebuild_data else '0'
+    env['F1_USE_CLEAN_CACHE'] = '1' if use_clean_cache else '0'
+    subprocess.run([sys.executable, "-m", "streamlit", "run", "app.py"], env=env)
 
 
-def run_quick_simulation():
+def run_quick_simulation(force_rebuild_data=False, use_clean_cache=True):
     """Run a quick simulation example"""
     print("\n" + "=" * 60)
     print("F1 RACE SIMULATION - Quick Example")
     print("=" * 60)
     
     loader = F1DataLoader()
-    loader.load_all_data()
+    loader.load_all_data(
+        use_clean_cache=use_clean_cache,
+        force_rebuild=force_rebuild_data
+    )
     
     engineer = FeatureEngineer(loader)
     engineer.create_training_data()
@@ -137,21 +147,44 @@ def main():
         action='store_true',
         help='Run a quick simulation example'
     )
+    parser.add_argument(
+        '--force-rebuild-data',
+        action='store_true',
+        help='Rebuild cleaned data cache from raw CSV files before running'
+    )
+    parser.add_argument(
+        '--no-clean-cache',
+        action='store_true',
+        help='Disable cleaned cache usage and read raw CSV files'
+    )
     
     args = parser.parse_args()
     
+    use_clean_cache = not args.no_clean_cache
+
     if args.train_only:
-        train_models()
+        train_models(
+            force_rebuild_data=args.force_rebuild_data,
+            use_clean_cache=use_clean_cache
+        )
     elif args.simulate:
-        run_quick_simulation()
+        run_quick_simulation(
+            force_rebuild_data=args.force_rebuild_data,
+            use_clean_cache=use_clean_cache
+        )
     else:
         # Check if models exist, train if not
         if not Path('models/points_model.pkl').exists():
             print("Models not found. Training new models...")
-            train_models()
-        
-        # Run dashboard
-        run_dashboard()
+            train_models(
+                force_rebuild_data=args.force_rebuild_data,
+                use_clean_cache=use_clean_cache
+            )
+
+        run_dashboard(
+            force_rebuild_data=args.force_rebuild_data,
+            use_clean_cache=use_clean_cache
+        )
 
 
 if __name__ == '__main__':

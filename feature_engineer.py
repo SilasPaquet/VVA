@@ -40,7 +40,11 @@ class FeatureEngineer:
         
         circuit_stats = self.loader.get_circuit_stats(data)
         data = data.merge(circuit_stats, on='circuitId', how='left')
-        data = data.fillna(data.mean(numeric_only=True))
+
+        # Nullable Int64 columns cannot be filled with float means directly.
+        numeric_cols = data.select_dtypes(include=[np.number]).columns
+        data[numeric_cols] = data[numeric_cols].astype(float)
+        data[numeric_cols] = data[numeric_cols].fillna(data[numeric_cols].mean())
         
         self.data = data
         return data

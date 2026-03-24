@@ -40,6 +40,26 @@ python main.py --train-only
 ```
 Trains models and saves them to `models/` directory (takes 2-5 minutes).
 
+## Cleaned Data Cache (Fast Re-runs)
+
+The loader saves cleaned files in `csv/cleaned/` and reuses them by default.
+
+```bash
+# Default behavior: use cleaned cache if present
+python main.py
+
+# Force rebuild cleaned cache from raw csv/*.csv
+python main.py --force-rebuild-data
+
+# Train only + force rebuild
+python main.py --train-only --force-rebuild-data
+
+# Ignore cleaned cache for this run
+python main.py --no-clean-cache
+```
+
+Use `--force-rebuild-data` when raw files changed or cleaning rules were updated.
+
 ## Dashboard Pages
 
 ### 1. **Dashboard**

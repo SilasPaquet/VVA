@@ -70,6 +70,33 @@ python main.py --simulate
 ```
 Runs a sample race simulation with 10 drivers.
 
+### Quick Execution Guide (Cleaned Data Cache)
+
+The loader now supports a cleaned-data cache in `csv/cleaned/`:
+- cleaned per-table CSVs (faster next runs)
+- merged race features cache (`race_features.csv`)
+
+Use these commands based on your need:
+
+```bash
+# Normal run (recommended): use cleaned cache if available
+python main.py
+
+# Rebuild cleaned cache from raw CSV files, then run
+python main.py --force-rebuild-data
+
+# Train only + force rebuild
+python main.py --train-only --force-rebuild-data
+
+# Ignore cleaned cache for this run (debug mode)
+python main.py --no-clean-cache
+```
+
+When to force rebuild:
+- You changed files in `csv/`
+- You changed cleaning rules in `data_loader.py`
+- You suspect stale cache data
+
 ## Project Structure
 
 ```

@@ -32,11 +32,14 @@ pio.templates.default = custom_template
 # =====================================================================
 
 @st.cache_resource
-def load_and_train_models():
+def load_and_train_models(force_rebuild_data=False, use_clean_cache=True):
     """Load data and train models"""
     with st.spinner("Loading and training models..."):
         loader = F1DataLoader()
-        loader.load_all_data()
+        loader.load_all_data(
+            use_clean_cache=use_clean_cache,
+            force_rebuild=force_rebuild_data
+        )
         
         engineer = FeatureEngineer(loader)
         engineer.create_training_data()
@@ -538,7 +541,13 @@ def main():
     if 'engineer' not in st.session_state:
         st.session_state.engineer = None
 
-    loader, engineer, predictor = load_and_train_models()
+    force_rebuild_data = os.environ.get('F1_FORCE_REBUILD_DATA', '0') == '1'
+    use_clean_cache = os.environ.get('F1_USE_CLEAN_CACHE', '1') == '1'
+
+    loader, engineer, predictor = load_and_train_models(
+        force_rebuild_data=force_rebuild_data,
+        use_clean_cache=use_clean_cache
+    )
     st.session_state.loader = loader
     st.session_state.engineer = engineer
     st.session_state.predictor = predictor
