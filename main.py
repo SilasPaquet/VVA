@@ -104,7 +104,6 @@ def run_quick_simulation(force_rebuild_data=False, use_clean_cache=True):
     
     simulator = GPSimulator(predictor, loader, engineer)
     
-    # Create sample race
     print("\nSimulating race at Circuit ID 1 with 10 drivers...")
     drivers = [
         {
@@ -173,7 +172,6 @@ def main():
             use_clean_cache=use_clean_cache
         )
     else:
-        # Check if models exist, train if not
         if not Path('models/points_model.pkl').exists():
             print("Models not found. Training new models...")
             train_models(

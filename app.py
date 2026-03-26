@@ -27,9 +27,7 @@ custom_template.layout.title.font.size = 24
 pio.templates.default = custom_template
 
 
-# =====================================================================
 # DATA & MODEL HELPERS
-# =====================================================================
 
 @st.cache_resource
 def load_and_train_models(force_rebuild_data=False, use_clean_cache=True):
@@ -113,9 +111,7 @@ def assign_deterministic_grid_positions(loader, drivers_info, race_index=0):
     return drivers_with_grid
 
 
-# =====================================================================
 # ÉCURIES PAGE HELPERS (Extracted)
-# =====================================================================
 
 def normalize_score(series, value, invert=False):
     values = pd.to_numeric(series, errors='coerce').dropna()
@@ -204,9 +200,7 @@ def calculate_ecuries_strength(constructor_stats):
     return constructor_stats
 
 
-# =====================================================================
 # PAGE RENDERERS
-# =====================================================================
 
 def render_qualifs_page(loader):
     st.title("F1 Race Predictions Dashboard")
@@ -496,9 +490,7 @@ def render_ecuries_page(loader, predictor, engineer, limits):
             else: simulate_ecurie_duel_season(sim, loader, drvs, weather, ss, sr, t_a, t_b, ca, cb)
 
 
-# =====================================================================
 # MAIN APP ROUTING
-# =====================================================================
 
 def render_page(page, loader, predictor, engineer, dataset_limits):
     if page == "QUALIFS":

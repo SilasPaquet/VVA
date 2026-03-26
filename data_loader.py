@@ -37,7 +37,6 @@ class F1DataLoader:
             'drivers': ['dob'],
         }
 
-        # Use pandas nullable integer types so missing values stay as <NA>.
         self._dtype_map = {
             'races': {
                 'raceId': 'Int64',
@@ -92,15 +91,12 @@ class F1DataLoader:
                 'statusId': 'Int64',
             },
         }
-
-        # Float fields that should always be numeric.
         self._float_columns = {
             'results': ['points'],
             'driver_standings': ['points'],
             'constructor_standings': ['points'],
         }
 
-        # Natural keys used to detect duplicate records.
         self._natural_keys = {
             'results': ['raceId', 'driverId'],
             'qualifying': ['raceId', 'driverId'],

@@ -37,7 +37,7 @@ class Config:
         'random_state': RANDOM_STATE
     }
     
-    WEATHER_IMPACT_RANGE = (0.5, 2.0)  # Min and max weather factors
+    WEATHER_IMPACT_RANGE = (0.5, 2.0)
     WEATHER_NEUTRAL = 1.0
     MAX_DRIVERS = 20
     MAX_POSITION = 20

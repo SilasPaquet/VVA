@@ -52,11 +52,9 @@ class F1Predictor:
         engineer = FeatureEngineer(loader)
         data = engineer.create_training_data()
         
-        # Use recent data for training
         current_year = data['year'].max()
         recent_data = data[data['year'] >= (current_year - recent_years)]
         
-        # Train points prediction model
         print("Training points prediction model...")
         X_points, y_points, self.feature_cols = engineer.get_feature_matrix('points_scored')
         X_points = X_points.iloc[len(X_points) - len(recent_data):]
@@ -96,7 +94,6 @@ class F1Predictor:
         pos_mae = mean_absolute_error(y_test_pos, pos_pred)
         print(f"Position Model - R2: {pos_r2:.4f}, MAE: {pos_mae:.4f}")
         
-        # Train finish prediction model (binary)
         print("Training finish prediction model...")
         X_finish = X_points.copy()
         y_finish = (recent_data['finished'].iloc[len(recent_data) - len(X_points):].values).astype(int)
@@ -127,7 +124,7 @@ class F1Predictor:
             raise ValueError("Model not trained yet. Call train_models() first.")
         X_input = self._prepare_prediction_input(features)
         pred = max(1, int(self.position_model.predict(X_input)[0]))
-        return min(pred, 20)  # Cap at 20th position
+        return min(pred, 20)
     
     def predict_finish(self, features):
         """Predict probability of finishing race"""
@@ -137,9 +134,7 @@ class F1Predictor:
         X_input = self._prepare_prediction_input(features)
         proba = self.finish_model.predict_proba(X_input)
         
-        # Handle case where only one class exists in training data
         if proba.shape[1] == 1:
-            # If only one class, return probability based on that class
             return proba[0][0] if self.finish_model.classes_[0] == 1 else 1 - proba[0][0]
         
         return proba[0][1]
