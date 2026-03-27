@@ -160,9 +160,12 @@ class GPSimulator:
         position_pred = self.predictor.predict_position(features)
         finish_prob = self.predictor.predict_finish(features)
 
-        if weather_factor < 1.0:
-            finish_prob *= (1 - (weather_factor * 0.3))
-            position_pred += int(5 * (1 - weather_factor))
+        position_pred, points_pred, finish_prob = self._apply_weather_effects(
+            position_pred=position_pred,
+            points_pred=points_pred,
+            finish_prob=finish_prob,
+            weather_factor=weather_factor
+        )
 
         if safety_car:
             finish_prob *= 1.1
@@ -184,6 +187,40 @@ class GPSimulator:
             'weather_factor': weather_factor,
             'constructor': driver_info.get('constructor', 'Unknown')
         }
+
+    def _apply_weather_effects(self, position_pred: float, points_pred: float,
+                               finish_prob: float, weather_factor: float):
+        """Apply non-linear weather penalties (wet and heat are both degrading)."""
+        weather_factor = float(np.clip(weather_factor, 0.5, 2.0))
+
+        wet_intensity = max(0.0, 1.0 - weather_factor)
+        heat_intensity = max(0.0, weather_factor - 1.0)
+        severity = abs(weather_factor - 1.0)
+
+        finish_multiplier = 1.0 - (
+            0.38 * wet_intensity
+            + 0.22 * heat_intensity
+            + 0.18 * (severity ** 2)
+        )
+        finish_multiplier = float(np.clip(finish_multiplier, 0.05, 1.0))
+
+        points_multiplier = 1.0 - (
+            0.30 * wet_intensity
+            + 0.18 * heat_intensity
+            + 0.12 * severity
+        )
+        points_multiplier = float(np.clip(points_multiplier, 0.30, 1.0))
+
+        # Wet weather creates larger race-time variance than dry heat.
+        position_penalty = int(round(
+            (6.0 * wet_intensity) + (3.0 * heat_intensity) + (1.5 * severity)
+        ))
+
+        position_pred = float(position_pred) + position_penalty
+        points_pred = float(points_pred) * points_multiplier
+        finish_prob = float(finish_prob) * finish_multiplier
+
+        return position_pred, points_pred, finish_prob
 
     def simulate_season(self, races_data: List[Dict], num_simulations: int = 1) -> pd.DataFrame:
         """

@@ -27,7 +27,9 @@ custom_template.layout.title.font.size = 24
 pio.templates.default = custom_template
 
 
+# =====================================================================
 # DATA & MODEL HELPERS
+# =====================================================================
 
 @st.cache_resource
 def load_and_train_models(force_rebuild_data=False, use_clean_cache=True):
@@ -111,7 +113,9 @@ def assign_deterministic_grid_positions(loader, drivers_info, race_index=0):
     return drivers_with_grid
 
 
+# =====================================================================
 # ÉCURIES PAGE HELPERS (Extracted)
+# =====================================================================
 
 def normalize_score(series, value, invert=False):
     values = pd.to_numeric(series, errors='coerce').dropna()
@@ -200,7 +204,9 @@ def calculate_ecuries_strength(constructor_stats):
     return constructor_stats
 
 
+# =====================================================================
 # PAGE RENDERERS
+# =====================================================================
 
 def render_qualifs_page(loader):
     st.title("F1 Race Predictions Dashboard")
@@ -357,7 +363,129 @@ def render_saison_page(loader, predictor, engineer, limits):
             execute_season_sim(GPSimulator(predictor, loader, engineer, deterministic=True), loader, season_roster, num_races, weather_mode, num_sims)
 
 
-def render_analytics_page(engineer):
+def _build_weather_exploration_lineup(loader):
+    """Create a representative, recent race lineup for weather sensitivity exploration."""
+    merged = loader.results.merge(
+        loader.races[['raceId', 'date', 'circuitId']],
+        on='raceId',
+        how='left'
+    )
+    merged['date'] = pd.to_datetime(merged['date'], errors='coerce')
+    merged['grid'] = pd.to_numeric(merged['grid'], errors='coerce')
+    merged = merged.dropna(subset=['raceId', 'driverId', 'constructorId', 'circuitId', 'grid', 'date'])
+    merged = merged[merged['grid'] > 0]
+
+    if merged.empty:
+        return None, [], None
+
+    race_meta = (
+        merged.groupby('raceId')
+        .agg(date=('date', 'max'), drivers=('driverId', 'nunique'))
+        .reset_index()
+        .sort_values('date', ascending=False)
+    )
+
+    selected_race_id = None
+    for _, row in race_meta.iterrows():
+        if int(row['drivers']) >= 10:
+            selected_race_id = int(row['raceId'])
+            break
+
+    if selected_race_id is None:
+        selected_race_id = int(race_meta.iloc[0]['raceId'])
+
+    race_rows = merged[merged['raceId'] == selected_race_id].copy()
+    race_rows = race_rows.merge(
+        loader.drivers[['driverId', 'forename', 'surname']],
+        on='driverId',
+        how='left'
+    )
+    race_rows = race_rows.merge(
+        loader.constructors[['constructorId', 'name']],
+        on='constructorId',
+        how='left'
+    )
+
+    race_rows['driver_name'] = (
+        race_rows['forename'].fillna('') + ' ' + race_rows['surname'].fillna('')
+    ).str.strip()
+    race_rows['constructor'] = race_rows['name'].fillna('Unknown')
+
+    race_rows = race_rows.sort_values('grid').drop_duplicates(subset=['driverId'], keep='first')
+
+    drivers_info = []
+    for _, row in race_rows.iterrows():
+        if not row['driver_name']:
+            continue
+        drivers_info.append({
+            'driver_id': int(row['driverId']),
+            'driver_name': row['driver_name'],
+            'constructor_id': int(row['constructorId']),
+            'constructor': str(row['constructor']),
+            'grid': int(row['grid'])
+        })
+
+    if not drivers_info:
+        return None, [], None
+
+    circuit_id = int(race_rows['circuitId'].iloc[0])
+    reference_date = race_rows['date'].max()
+    return circuit_id, drivers_info, reference_date
+
+
+def _compute_weather_sensitivity(simulator, circuit_id, drivers_info):
+    scenarios = [
+        ('Very Wet', 0.50),
+        ('Wet', 0.70),
+        ('Damp', 0.85),
+        ('Neutral', 1.00),
+        ('Warm', 1.15),
+    ]
+
+    driver_rows = []
+    team_rows = []
+    summary_rows = []
+
+    for scenario_name, weather_factor in scenarios:
+        race_results = simulator.simulate_race(
+            circuit_id=circuit_id,
+            drivers_info=drivers_info,
+            weather_factor=float(weather_factor),
+            safety_car=False
+        )
+
+        scenario_driver = race_results.copy()
+        scenario_driver['scenario'] = scenario_name
+        scenario_driver['weather_factor'] = float(weather_factor)
+        scenario_driver['predicted_position'] = pd.to_numeric(
+            scenario_driver['predicted_position'], errors='coerce'
+        )
+        driver_rows.extend(scenario_driver[[
+            'scenario', 'weather_factor', 'driver_name', 'constructor',
+            'grid_position', 'predicted_position', 'actual_points', 'finished'
+        ]].to_dict(orient='records'))
+
+        team_points = race_results.groupby('constructor', as_index=False)['actual_points'].sum()
+        for _, row in team_points.iterrows():
+            team_rows.append({
+                'scenario': scenario_name,
+                'weather_factor': float(weather_factor),
+                'constructor': row['constructor'],
+                'team_points': float(row['actual_points'])
+            })
+
+        summary_rows.append({
+            'scenario': scenario_name,
+            'weather_factor': float(weather_factor),
+            'avg_predicted_position': float(pd.to_numeric(race_results['predicted_position'], errors='coerce').mean()),
+            'finish_rate': float(race_results['finished'].mean() * 100.0),
+            'avg_points': float(race_results['actual_points'].mean())
+        })
+
+    return pd.DataFrame(summary_rows), pd.DataFrame(team_rows), pd.DataFrame(driver_rows)
+
+
+def render_analytics_page(loader, predictor, engineer):
     st.title("Detailed Analytics")
     race_data = engineer.data
     if race_data is None:
@@ -375,6 +503,70 @@ def render_analytics_page(engineer):
     tops = race_data['name'].value_counts().head(5).index
     constructor_years = race_data[race_data['name'].isin(tops)].groupby(['year', 'name'])['points_scored'].mean().reset_index()
     st.plotly_chart(px.line(constructor_years, x='year', y='points_scored', color='name', title='Top 5 Constructors Avg Points'), use_container_width=True)
+
+    st.divider()
+    st.subheader("Weather Impact Exploratory Analysis")
+
+    st.markdown(
+        "**Sources used for weather-analysis framing:**\n"
+        "- FIA Regulations portal (official sporting/technical framework): https://www.fia.com/regulation/category/110\n"
+        "- FastF1 `Session.weather_data` reference: https://docs.fastf1.dev/core.html#fastf1.core.Session.weather_data\n"
+        "- FastF1 weather channels (`AirTemp`, `Rainfall`, `TrackTemp`, `WindSpeed`): https://docs.fastf1.dev/api.html#fastf1.api.weather_data\n"
+        "- FastF1 tire compounds include `INTERMEDIATE` and `WET`: https://docs.fastf1.dev/core.html#fastf1.core.Laps.pick_compounds\n"
+        "- OpenF1 weather endpoint fields (`rainfall`, `air_temperature`, `track_temperature`, `wind_speed`): https://openf1.org/docs#weather"
+    )
+
+    circuit_id, drivers_info, reference_date = _build_weather_exploration_lineup(loader)
+    if circuit_id is None or len(drivers_info) < 2:
+        st.warning("Not enough data to run weather exploration graphs.")
+        return
+
+    simulator = GPSimulator(predictor, loader, engineer, deterministic=True)
+    weather_summary, team_weather, driver_weather = _compute_weather_sensitivity(simulator, circuit_id, drivers_info)
+
+    if weather_summary.empty or team_weather.empty or driver_weather.empty:
+        st.warning("Weather sensitivity computation produced no data.")
+        return
+
+    if reference_date is not None and not pd.isna(reference_date):
+        st.caption(f"Reference lineup date: {reference_date.date()} | Drivers in sample: {len(drivers_info)}")
+
+    scenario_order = ['Very Wet', 'Wet', 'Damp', 'Neutral', 'Warm']
+
+    fig_driver_dist = px.box(
+        driver_weather,
+        x='scenario',
+        y='predicted_position',
+        points='all',
+        color='scenario',
+        category_orders={'scenario': scenario_order},
+        title='Driver Finishing Position Distribution by Weather Scenario',
+        labels={'scenario': 'Scenario', 'predicted_position': 'Predicted finishing position (lower is better)'}
+    )
+    fig_driver_dist.update_yaxes(autorange='reversed')
+    st.plotly_chart(fig_driver_dist, use_container_width=True)
+
+    baseline_points = (
+        team_weather[team_weather['scenario'] == 'Neutral'][['constructor', 'team_points']]
+        .rename(columns={'team_points': 'neutral_team_points'})
+    )
+    team_delta = team_weather.merge(baseline_points, on='constructor', how='left')
+    team_delta['delta_vs_neutral'] = team_delta['team_points'] - team_delta['neutral_team_points']
+
+    top_teams = baseline_points.sort_values('neutral_team_points', ascending=False).head(6)['constructor']
+    team_delta = team_delta[team_delta['constructor'].isin(top_teams)].copy()
+
+    fig_team_delta = px.bar(
+        team_delta,
+        x='constructor',
+        y='delta_vs_neutral',
+        color='scenario',
+        barmode='group',
+        category_orders={'scenario': scenario_order},
+        title='Top Teams: Points Delta vs Neutral Weather Scenario',
+        labels={'constructor': 'Constructor', 'delta_vs_neutral': 'Points delta vs Neutral'}
+    )
+    st.plotly_chart(fig_team_delta, use_container_width=True)
 
 
 def display_ecurie_attributes(val_a, val_b, attr_name, col_a, col_b):
@@ -490,7 +682,9 @@ def render_ecuries_page(loader, predictor, engineer, limits):
             else: simulate_ecurie_duel_season(sim, loader, drvs, weather, ss, sr, t_a, t_b, ca, cb)
 
 
+# =====================================================================
 # MAIN APP ROUTING
+# =====================================================================
 
 def render_page(page, loader, predictor, engineer, dataset_limits):
     if page == "QUALIFS":
@@ -500,7 +694,7 @@ def render_page(page, loader, predictor, engineer, dataset_limits):
     elif page == "SAISON":
         render_saison_page(loader, predictor, engineer, dataset_limits)
     elif page == "ANALYTICS":
-        render_analytics_page(engineer)
+        render_analytics_page(loader, predictor, engineer)
     elif page == "ÉCURIES":
         render_ecuries_page(loader, predictor, engineer, dataset_limits)
 

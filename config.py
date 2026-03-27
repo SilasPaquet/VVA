@@ -78,8 +78,11 @@ class WeatherSimulator:
     
     @staticmethod
     def get_random_weather() -> tuple:
-        """Get mixed weather conditions (deterministic mean)"""
-        return 'mixed', 1.0
+        """Get mixed weather conditions using a weighted realistic distribution."""
+        weather_types = ['sunny', 'cloudy', 'light_rain', 'heavy_rain', 'extreme_heat']
+        probabilities = [0.50, 0.20, 0.18, 0.05, 0.07]
+        selected = str(np.random.choice(weather_types, p=probabilities))
+        return selected, WeatherSimulator.get_weather_factor(selected)
 
 
 
